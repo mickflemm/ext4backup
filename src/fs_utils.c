@@ -386,7 +386,8 @@ int update_ext4_fstimes(struct e4b_state *st)
 			utils_wrn("Couldn't open target fs for preserving ctime/crtime\n");
 			goto cleanup;
 		}
-	}
+	} else
+		goto cleanup;
  
 	for (lptr = st->entries; lptr != NULL; lptr = lptr->next) {
 		eptr = (struct e4b_entry *)lptr->data;
