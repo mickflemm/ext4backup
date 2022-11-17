@@ -121,6 +121,8 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);	
 	}
 
+	utils_ann("\t--== ext4backup version %s ==--\n\n", VERSION);
+
 	/* Drop privileges if we are root */
 	caps = cap_get_proc();
 	if (uid == 0) {
