@@ -85,6 +85,8 @@ enum e4b_opts {
 	E4B_OPT_NO_ACL		= (1 << 10),
 	E4B_OPT_IGNORE_NODUMP	= (1 << 11),
 	E4B_OPT_EXT4_FSTIMES	= (1 << 12),
+	E4B_OPT_FORCE_UPDATE	= (1 << 13),
+	E4B_OPT_COPY_ENCRYPTED	= (1 << 14)
 };
 
 struct e4b_entry {
@@ -111,10 +113,12 @@ void print_time(struct timespec *ts, bool debug);
 const char *print_size(off_t bytes);
 
 /* Path manipulation */
-char *get_lnk_path(struct e4b_entry *entry, struct e4b_state *st);
+char *get_sanitized_lnk_path(struct e4b_entry *entry, struct e4b_state *st);
 
 /* FS helpers / EXT4-related ctime/crtime manipulation */
 int get_path_info(const char *path, int fd, struct statx *buf, bool may_not_exist);
+char *get_lnk_path(struct e4b_entry *entry, struct e4b_state *st, int dst, int *pathlen);
+int check_lnk_path_match(struct e4b_entry *entry, struct e4b_state *st);
 int set_fs_freeze(char* path, bool freeze);
 int update_ext4_fstimes(struct e4b_state *st);
 
@@ -131,7 +135,7 @@ int init_state(const char* src_in, const char* dst_in, int opts, struct e4b_stat
 void free_state(struct e4b_state *st);
 
 /* Entry processing */
-int copy_data(struct e4b_entry *entry);
+ssize_t copy_data(struct e4b_entry *entry);
 int copy_metadata(struct e4b_entry *entry);
 int update_subdirs(struct e4b_state *st);
 int process_entries(struct e4b_state *st);

@@ -69,7 +69,19 @@ static int init_entry(const char *filepath, const struct stat *info,
 	}
 
 	/* Skip encrypted files that we can't process */
-	if (src_info.stx_attributes & STATX_ATTR_ENCRYPTED) {
+	/* Note: We can't handle encrypted files with the current user API,
+	 * for regular files we can try and open them and fail with ENOKEY,
+	 * for directories we can open them and use ioctls to see if the key
+	 * used for their encryption is present, but for symlinks we can do
+	 * nothing (ioctl doesn't accept O_PATH descriptors). According to
+	 * the docs there will be an API for backing up encrypted files
+	 * but it's not there yet. So for now warn the user and let the
+	 * user copy the encrypted files manualy after adding the key to
+	 * the keyring/unlocking them. As an alternative, check for the
+	 * E4B_OPT_COPY_ENCRYPTED option and assume the user has already
+	 * provided the encryption keys needed. */
+	if (src_info.stx_attributes & STATX_ATTR_ENCRYPTED &&
+	    !(e4bst->opts & E4B_OPT_COPY_ENCRYPTED)) {
 		utils_wrn("Skipping encrypted file: %s\n", filepath);
 		return FTW_CONTINUE;
 	}

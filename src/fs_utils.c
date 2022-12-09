@@ -8,15 +8,16 @@
 
 #include "ext4backup.h"
 #include <stddef.h>	/* For NULL, offsetof */
-#include <stdlib.h>	/* For malloc()/free() */
+#include <stdlib.h>	/* For malloc()/realloc()/free() */
 #include <string.h>	/* For memcpy() */
 #include <libudev.h>	/* For udev_*() functions and related structs */
 #include <sys/ioctl.h>	/* For ioctl() */
 #include <linux/fs.h>	/* For FIFREEZE/FITHAW */
 #include <fcntl.h>	/* For open(), O_* flags, AT_* flags */
-#include <unistd.h>	/* For close() */
+#include <unistd.h>	/* For close(), readlinkat() */
 #include <sys/stat.h>	/* For stat(), statx() */
 #include <ext2fs/ext2fs.h>	/* For libext2fs structs/functions */
+#include <linux/fscrypt.h>
 
 
 /*********\
@@ -51,6 +52,9 @@ int get_path_info(const char *path, int fd, struct statx *buf, bool may_not_exis
 		return errno;
 	}
 
+	/* Mask-out unsupported attributes */
+	buf->stx_attributes &= buf->stx_attributes_mask;
+
 	if ((buf->stx_mask & requested_stx_mask) != requested_stx_mask) {
 		/* No worries if we didn't get BTIME (crtime), we can recover from it */
 		if (((buf->stx_mask & requested_stx_mask) ^ requested_stx_mask) == STATX_BTIME)
@@ -60,10 +64,67 @@ int get_path_info(const char *path, int fd, struct statx *buf, bool may_not_exis
 		return EIO;
 	}
 
-	/* Mask-out unsupported attributes */
-	buf->stx_attributes &= buf->stx_attributes_mask;
-
 	return 0;
+}
+
+char *get_lnk_path(struct e4b_entry *entry, struct e4b_state *st, int dst, int *pathlen)
+{
+	char *lnk_path = NULL;
+	char *tmp = NULL;
+	int lnk_pathlen = 0;
+	int tmp_lnk_pathlen = 64;
+	int dirfd = dst ? st->dst_dirfd : st->src_dirfd;
+retry:
+	if (!lnk_path || lnk_pathlen != 0) {
+		tmp = realloc(lnk_path, tmp_lnk_pathlen);
+		if (!tmp) {
+			utils_err("Could not allocate buffer for new symlink target\n");
+			if (lnk_path)
+				free(lnk_path);
+			return NULL;
+		} else
+			lnk_path = tmp;
+	}
+
+	lnk_pathlen = readlinkat(dirfd, entry->path, lnk_path, tmp_lnk_pathlen);
+	if (lnk_pathlen < 0) {
+		utils_err("Could not get symlink contents for:\n\t%s\n", entry->path);
+		utils_perr("readlink() failed");
+		free(lnk_path);
+		return NULL;
+	}
+
+	/* Did readlink truncate ? */
+	if (lnk_pathlen == tmp_lnk_pathlen) {
+		tmp_lnk_pathlen += 64;
+		goto retry;
+	}
+
+	lnk_path[lnk_pathlen] = '\0';
+	if (pathlen)
+		*pathlen = lnk_pathlen;
+	return lnk_path;
+}
+
+int check_lnk_path_match(struct e4b_entry *entry, struct e4b_state *st)
+{
+	int src_lnk_pathlen = 0;
+	char *src_lnk_path = get_lnk_path(entry, st, 0, &src_lnk_pathlen);
+	char *dst_lnk_path = get_lnk_path(entry, st, 1, NULL);
+	int ret = 0;
+
+	if (!src_lnk_path | !dst_lnk_path) {
+		if (src_lnk_path)
+			free(src_lnk_path);
+		if (dst_lnk_path)
+			free(dst_lnk_path);
+		return 0;
+	}
+
+	ret = strncmp(src_lnk_path, dst_lnk_path, src_lnk_pathlen);
+	free(src_lnk_path);
+	free(dst_lnk_path);
+	return ret;
 }
 
 static int get_mountpoint_len(const char *path_in) {

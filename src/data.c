@@ -16,12 +16,13 @@
 * DATA TRANSFER *
 \***************/
 
-static int copy_data_chunk(int src_fd, int dst_fd, off_t offset, size_t len)
+static ssize_t copy_data_chunk(int src_fd, int dst_fd, off_t offset, size_t len)
 {
 	static bool use_sendfile = false;
 	off_t off_in = offset;
 	off_t off_out = offset;
-	int ret = 0;
+	off_t tmp_off = 0;
+	ssize_t ret = 0;
 
 	utils_dbg("copying %i bytes\n", len);
 
@@ -44,11 +45,11 @@ static int copy_data_chunk(int src_fd, int dst_fd, off_t offset, size_t len)
 	 * target file, it'll start writing there from its current offset. To avoid that
 	 * update the offset of the target file so that sendfile() copies from / to the
 	 * same offset. */
-	ret = TEMP_FAILURE_RETRY(lseek(dst_fd, off_in, SEEK_SET));
-	if (ret < 0) {
+	tmp_off = TEMP_FAILURE_RETRY(lseek(dst_fd, off_in, SEEK_SET));
+	if (tmp_off == (off_t) -1) {
 		utils_err("Could not sync target file's offset when using sendfile\n");
 		utils_perr("lseek(SEEK_SET) failed");
-		return ret;
+		return -1;
 	}
 	ret = sendfile(dst_fd, src_fd, &off_in, len);
 	if (ret < 0) {
@@ -58,7 +59,7 @@ static int copy_data_chunk(int src_fd, int dst_fd, off_t offset, size_t len)
 	return ret;
 }
 
-int copy_data(struct e4b_entry *entry)
+ssize_t copy_data(struct e4b_entry *entry)
 {
 	struct statx *src_info = &entry->src_info;
 	int src_fd = entry->src_fd;
@@ -67,7 +68,7 @@ int copy_data(struct e4b_entry *entry)
 	off_t chunk_end = 0;
 	size_t chunk_len = 0;
 	off_t src_offt = 0;
-	int ret = 0;
+	ssize_t ret = 0;
 
 	utils_dbg("Copying %i bytes\n", src_info->stx_size);
 

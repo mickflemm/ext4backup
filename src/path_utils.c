@@ -9,8 +9,6 @@
 #include "ext4backup.h"
 #include <stddef.h>	/* For NULL */
 #include <string.h>	/* For strchr(), strncmp(), strnlen(), memmove(), memcpy() */
-#include <stdlib.h>	/* For realloc() */
-#include <unistd.h>	/* For readlinkat() */
 #include <sys/param.h>	/* For MIN */
 
 /*******************\
@@ -77,42 +75,19 @@ static int get_common_prefix_depth(const char *path1, char *path2, int *len)
 	return depth;
 }
 
-char *get_lnk_path(struct e4b_entry *entry, struct e4b_state *st)
+char *get_sanitized_lnk_path(struct e4b_entry *entry, struct e4b_state *st)
 {
 	char *lnk_path = NULL;
 	int lnk_pathlen = 0;
-	int tmp_lnk_pathlen = 64;
 	int common_prefix_depth = 0;
 	int common_prefix_len = 0;
 	int back_steps = 0;
-	char *tmp = NULL;
 	char *relpath_str = NULL;
 	int relpath_len = 0;
 
- retry:
-	if (!lnk_path || lnk_pathlen != 0) {
-		tmp = realloc(lnk_path, tmp_lnk_pathlen);
-		if (!tmp) {
-			utils_err("Could not allocate buffer for new symlink target\n");
-			return NULL;
-		} else
-			lnk_path = tmp;
-	}
-	
-	lnk_pathlen = readlinkat(st->src_dirfd, entry->path, lnk_path, tmp_lnk_pathlen);
-	if (lnk_pathlen < 0) {
-		utils_err("Could not get symlink contents for:\n\t%s\n", entry->path);
-		utils_perr("readlink() failed");
+	lnk_path = get_lnk_path(entry, st, 0, &lnk_pathlen);
+	if (!lnk_path)
 		return NULL;
-	}
-
-	/* Did readlink truncate ? */
-	if (lnk_pathlen == tmp_lnk_pathlen) {
-		tmp_lnk_pathlen += 64;
-		goto retry;
-	}
-
-	lnk_path[lnk_pathlen] = '\0';
 	utils_dbg("Got symlink:\n\t%s -> %s\n", entry->path, lnk_path);
 
 	/* In case we have an absolute symlink that points somewhere within
@@ -178,5 +153,3 @@ char *get_lnk_path(struct e4b_entry *entry, struct e4b_state *st)
 
 	return lnk_path;
 }
-
-
