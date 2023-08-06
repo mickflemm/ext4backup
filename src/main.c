@@ -36,6 +36,7 @@ void usage(const char *self)
 	utils_info("\t--ext4-fstimes\tAttempt to preserve ctime/crtime on destination fs in case it's ext4\n");
 	utils_info("\t--force-update\tAlways update files on destination if they exist\n");
 	utils_info("\t--copy-encrypted\tAssume all encrypted files in source hierarchy are unlocked\n");
+	utils_info("\t--keep-going\tContinue on failure instead of exiting\n");
 
 	utils_info("\nNotes:\n");
 	utils_info("* The programm will not cross filesystem boundaries, anything mounted on the source hierarchy will be ignored\n");
@@ -69,6 +70,7 @@ static const struct option options[] = {
 	{"ext4-fstimes",	no_argument, NULL, E4B_OPT_EXT4_FSTIMES},
 	{"force-update",	no_argument, NULL, E4B_OPT_FORCE_UPDATE},
 	{"copy-encrypted",	no_argument, NULL, E4B_OPT_COPY_ENCRYPTED},
+	{"keep-going",		no_argument, NULL, E4B_OPT_KEEP_GOING},
 	{0,			0,	     0,	   0}
 };
 

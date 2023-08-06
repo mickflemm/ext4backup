@@ -323,6 +323,8 @@ int process_entries(struct e4b_state *st)
 		if (ret) {
 			utils_dbg("process_entry() exited with %lu for %s\n",
 				  ret, eptr->path);
+			if (st->opts & E4B_OPT_KEEP_GOING)
+				continue;
 			return ret;
 		}
 		st->entries_processed++;
