@@ -139,7 +139,7 @@ static int get_mountpoint_len(const char *path_in) {
 
 	if (!last) {
 		utils_err("Provided path doesn't include '/'\n");
-		return 0;	
+		return 0;
 	}
 
 	/* Make a copy of path_in to tamper with */
@@ -219,7 +219,7 @@ int set_fs_freeze(char* path, bool freeze) {
 		utils_wrn("open() failed: %s\n", strerror(errno));
 		return errno;
 	}
-	
+
 	/* Sanity check: make sure it's a directory */
 	ret = stat(path, &pathinfo);
 	if (ret) {
@@ -231,7 +231,7 @@ int set_fs_freeze(char* path, bool freeze) {
 	path[mountpoint_len] = saved;
 
 	if (freeze) {
-		ret = ioctl(mpfd, FIFREEZE, 0);	
+		ret = ioctl(mpfd, FIFREEZE, 0);
 	} else {
 		ret = ioctl(mpfd, FITHAW, 0);
 	}
@@ -316,7 +316,7 @@ static int open_extfs(struct e4b_state *st) {
 		ext2fs_close_free(&st->dst_fs);
 		return ENOTSUP;
 	}
-	
+
 	return 0;
 }
 
@@ -361,7 +361,7 @@ static int set_extfs_inode_times(struct e4b_entry *entry)
 		ret = errno;
 		goto cleanup;
 	}
-  
+
 	inode = (ext2_ino_t) dst_info->stx_ino;
 
 	ret = ext2fs_read_inode_full(st->dst_fs, inode, inode_buf, EXT2_INODE_SIZE(st->dst_fs->super));
@@ -385,7 +385,7 @@ static int set_extfs_inode_times(struct e4b_entry *entry)
 		xtime_decode(large_inode->i_crtime, large_inode->i_crtime_extra, &ts);
 		utils_dbg("current crtime: ");
 		print_time(&ts, true);
-		utils_dbg("\n");		
+		utils_dbg("\n");
 
 		ts.tv_sec = src_info->stx_btime.tv_sec;
 		ts.tv_nsec = src_info->stx_btime.tv_nsec;
@@ -400,7 +400,7 @@ static int set_extfs_inode_times(struct e4b_entry *entry)
 	utils_dbg("current ctime: ");
 	print_time(&ts, true);
 	utils_dbg("\n");
-		
+
 	ts.tv_sec = src_info->stx_ctime.tv_sec;
 	ts.tv_nsec = src_info->stx_ctime.tv_nsec;
 	xtime_encode(&large_inode->i_ctime, &large_inode->i_ctime_extra, &ts);
@@ -437,7 +437,7 @@ int update_ext4_fstimes(struct e4b_state *st)
 		utils_wrn("Could not freeze target fs, unable to preserve inode times (ctime/crtime)\n");
 		return ret;
 	}
-		
+
 	/* Check if target fs is ext4, note that the same magic number applies for
 	 * ext2/3 so we also need to do further checks down the line. */
 	if ((st->dst_fsinfo.f_type == EXT4_SUPER_MAGIC)) {
@@ -449,7 +449,7 @@ int update_ext4_fstimes(struct e4b_state *st)
 		}
 	} else
 		goto cleanup;
- 
+
 	for (lptr = st->entries; lptr != NULL; lptr = lptr->next) {
 		eptr = (struct e4b_entry *)lptr->data;
 		/* When we re-create a hardlink on the target hierarchy we
@@ -473,6 +473,14 @@ int update_ext4_fstimes(struct e4b_state *st)
 	if (ret) {
 		utils_wrn("Could not unfreeze target fs, run fsfreeze manualy to recover !\n");
 	}
- 
+
+	/* Sync and drop caches to make updated ctime/crtimes visible */
+	sync();
+	ret = open("/proc/sys/vm/drop_caches", O_WRONLY);
+	if(write(ret, "3", 1) < 0) {
+		utils_wrn("Could not drop caches: %s\n", strerror(errno));
+	}
+	close(ret);
+
 	return 0;
 }

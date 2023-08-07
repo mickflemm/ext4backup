@@ -74,7 +74,7 @@ void copy_attrs(struct e4b_entry *entry)
 		utils_dbg("FS_IOC_GETFLAGS didn't work on %s\n", entry->path);
 		return;
 	}
-	
+
 	utils_dbg("attrs: 0x%X\n", src_attr);
 
 	/* Filter out the flags we can't play with */
@@ -102,7 +102,7 @@ void copy_attrs(struct e4b_entry *entry)
 		utils_dbg("Immutable directory: %s\n", entry->path);
 		st->immutables = g_list_prepend(st->immutables, (gpointer) entry);
 		src_attr &= ~FS_IMMUTABLE_FL;
-	}	 
+	}
 
 	/* If we have the immutable flag set and the src inode
 	 * has multiple hardlinks, ignore it for now since we
@@ -174,7 +174,7 @@ static int set_immutable(struct e4b_entry *entry, struct e4b_state *st)
 		utils_wrn("openat() failed: %s\n", strerror(errno));
 		goto cleanup;
 	}
-	
+
 	ret = ioctl(dst_fd, FS_IOC_GETFLAGS, &dst_attr);
 	if (ret < 0) {
 		utils_wrn("Could not get target attrs for editing: %s\n", entry->path);

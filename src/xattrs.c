@@ -424,7 +424,7 @@ int copy_xattrs(const char* src_fdpath, const char* dst_fdpath, struct e4b_entry
 			if (ret)
 				goto cleanup;
 			continue;
-		}	
+		}
 
 		ret = setxattr(dst_fdpath, key, val, val_len, 0);
 		if (ret < 0) {
@@ -436,7 +436,7 @@ int copy_xattrs(const char* src_fdpath, const char* dst_fdpath, struct e4b_entry
 				utils_err("Error while setting xattr (%s) to:\n\t%s\n",
 					   key, entry->path);
 				utils_perr("lsetxattr() failed");
-				ret = errno;				
+				ret = errno;
 				goto cleanup;
 			}
 		}

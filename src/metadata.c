@@ -131,7 +131,7 @@ static int update_subdir_times(struct e4b_entry *entry, struct e4b_state *st)
 		utils_err("Error invalid entry in subdirs list !\n");
 		return EINVAL;
 	}
-	
+
 	times[0].tv_sec = src_info->stx_atime.tv_sec;
 	times[0].tv_nsec = src_info->stx_atime.tv_nsec;
 

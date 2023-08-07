@@ -5,7 +5,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
- 
+
 #include "ext4backup.h"
 #include <stdio.h>	/* For *printf() etc */
 #include <string.h>	/* For strerror() */

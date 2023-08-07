@@ -96,12 +96,19 @@ static int process_entry(struct e4b_entry *entry)
 		if (st->opts & E4B_OPT_FORCE_UPDATE)
 			goto update_check_done;
 
-		/* Do they have the same mtime and ctime ? If so nothing has changed
-		 * since the last backup. This is a relatively safe check since in
-		 * order to tweak ctime root access is needed (and if an attacker has
-		 * root access there is nothing we can do). */
-		if (timestamp_eq(&src_info->stx_mtime, &dst_info->stx_mtime) &&
-		    timestamp_eq(&src_info->stx_ctime, &dst_info->stx_ctime))
+		/* Do they have the same ctime ? If so assume that nothing has changed
+		 * since the last backup, and files are the same. If file name, size, mtime,
+		 * attrs/xattrs etc change, ctime would also change. If the file contents changed
+		 * mtime would change, also modifying ctime in the process, and even if an attacker
+		 * re-sets mtime afterwards, there is no way to preserve ctime unless the attacker
+		 * has root access (and if an attacker has root access, it's game over anyway). Note
+		 * that there is also the S_NOCMTIME flag, used in network file systems where those
+		 * timestamps are managed by the server, so they may not be accurate e.g. in case
+		 * someone modified this file/dir while we were backing things up, but under normal
+		 * circumstances where the source fs is local and frozen, I don't see a way arround
+		 * this without root privileges, and even for networked file systems it's not that
+		 * easy, in any case there is always E4B_OPT_FORCE_UPDATE. */
+		if (timestamp_eq(&src_info->stx_ctime, &dst_info->stx_ctime))
 			return 0;
 
 		/* Size comparison only makes sense for regular files and symlinks */
@@ -138,25 +145,24 @@ static int process_entry(struct e4b_entry *entry)
 				goto update_check_done;
 			}
 		} else if (S_ISREG(src_info->stx_mode)) {
-		/* We don't have a way of comparing inode data/attributes etc so we'll
-		 * overwrite them anyway if needed, at this point we can only compare
-		 * contents of files / symlinks, and prevent copying them as an optimization.
-		 * The simple approach is to check if mtimes are the same, if not (since we
-		 * checked if source is older than the destination above) the source will be
-		 * newer than the destination and we need to update destination. However this
-		 * check is unsafe because an attacker may tweak the file contents of the
-		 * destination, keeping the same size (e.g. a file containing hashes, where
-		 * some hashes are replaced) as well as the mtime, so we may end up keeping
-		 * an insecure copy of the file on the backup. A safer approach is to compare
-		 * source and destination, which may be faster than updating the file (writing
-		 * in a storage device is usually slower than reading), but it has to be done
-		 * in userspace so it's much worse. For now the E4B_OPT_FORCE_UPDATE makes more
+		/* We have a file with the same size as the original and different ctimes.
+		 * We don't have a way of comparing a file's metadata without reading them
+		 * on both ends, cheking if they are the same, and update them if needed. This is
+		 * expensive, more expensive than just updating them anyway. The same is true for
+		 * file contents, only in this case the overwrite is also quite expensive and it
+		 * makes sense to try to avoid it if possible. The simple approach here is to
+		 * compare mtimes, and if they match, assume that file contents haven't changed
+		 * and move on. However this check is unsafe because an attacker may tweak the file
+		 * contents of the destination, keeping the same size (e.g. a file containing hashes,
+		 * where some hashes are replaced) as well as the mtime, so we may end up keeping
+		 * an insecure copy of the file on the backup by skipping its update. A safer
+		 * approach is to compare source and destination contents, but it has to be done
+		 * in userspace so it's very expensive. For now the E4B_OPT_FORCE_UPDATE makes more
 		 * sense and will be faster than comparing the files, in the future I may use
 		 * IMA measurements if available, which are done in-kernel and cached (and there
 		 * is also work to extend NFSv4 so that we can hopefuly get measurements from
 		 * the NFS server instead of having to read the file on the client), or something
-		 * better (wouldn't it be great if we could use FS_IOC_MEASURE_VERITY without
-		 * making it permanent and turn the file read-only ?). */
+		 * better.*/
 			if (timestamp_eq(&src_info->stx_mtime, &dst_info->stx_mtime))
 				skip_copy = 1;
 		}
@@ -219,7 +225,7 @@ static int process_entry(struct e4b_entry *entry)
 		 * later on, add directories to a separate list, so that we can update
 		 * their timestamps after we are done copying files. */
 		st->subdirs = g_list_prepend(st->subdirs, (gpointer) entry);
-		
+
 		src_open_flags = O_DIRECTORY | O_NOFOLLOW | O_NOATIME | O_RDONLY;
 		dst_open_flags = src_open_flags;
 		break;

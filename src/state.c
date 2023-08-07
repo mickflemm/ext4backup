@@ -49,7 +49,7 @@ static int init_entry(const char *filepath, const struct stat *info,
 	/* If NONRECURSIVE was requested skip any subdirectories */
 	if ((typeflag == FTW_D) && (pathinfo->level > 0)
 	    && (e4bst->opts & E4B_OPT_NONRECURSIVE))
-		ret = FTW_SKIP_SUBTREE;
+		return FTW_SKIP_SUBTREE;
 
 	/* Get more infos about the file using statx */
 	ret = get_path_info(filepath, 0, &src_info, 0);
@@ -61,9 +61,9 @@ static int init_entry(const char *filepath, const struct stat *info,
 	/* Handle files/directories marked with NODUMP */
 	if ((src_info.stx_attributes & STATX_ATTR_NODUMP) &&
 	    !(e4bst->opts & E4B_OPT_IGNORE_NODUMP)) {
-	    	utils_wrn("Skipping path marked with NODUMP: %s\n", filepath);
+		utils_wrn("Skipping path marked with NODUMP: %s\n", filepath);
 		if (typeflag == FTW_D)
-			ret = FTW_SKIP_SUBTREE;
+			return FTW_SKIP_SUBTREE;
 		else
 			return FTW_CONTINUE;
 	}
@@ -82,6 +82,10 @@ static int init_entry(const char *filepath, const struct stat *info,
 	 * provided the encryption keys needed. */
 	if (src_info.stx_attributes & STATX_ATTR_ENCRYPTED &&
 	    !(e4bst->opts & E4B_OPT_COPY_ENCRYPTED)) {
+		if (typeflag == FTW_D) {
+			utils_wrn("Skipping encrypted directory: %s\n", filepath);
+			return FTW_SKIP_SUBTREE;
+		}
 		utils_wrn("Skipping encrypted file: %s\n", filepath);
 		return FTW_CONTINUE;
 	}
@@ -113,7 +117,7 @@ static int init_entry(const char *filepath, const struct stat *info,
 	e4bst->entries = g_list_prepend(e4bst->entries, (gpointer) entry);
 	e4bst->num_entries++;
 	e4bst->data_len += info->st_size;
-	
+
 	return FTW_CONTINUE;
 }
 
@@ -183,7 +187,7 @@ int init_state(const char* src_in, const char* dst_in, int opts, struct e4b_stat
 	ret = get_path_info(src, 0, &src_info, false);
 	if (ret)
 		goto cleanup;
-		
+
 	ret = TEMP_FAILURE_RETRY(statfs(src, &e4bst->src_fsinfo));
 	if (ret) {
 		utils_perr("statfs() failed for source dir");
@@ -214,7 +218,7 @@ int init_state(const char* src_in, const char* dst_in, int opts, struct e4b_stat
 		goto cleanup;
 	}
 
-	
+
 	/* Same for target directory/fs */
 	dst = realpath(dst_in, NULL);
 	if (!dst) {
@@ -241,9 +245,9 @@ int init_state(const char* src_in, const char* dst_in, int opts, struct e4b_stat
 	    src_info.stx_dev_minor == dst_info.stx_dev_minor) {
 		utils_err("Source and destination are the same dir\n");
 		ret = EINVAL;
-		goto cleanup;    
+		goto cleanup;
 	}
-	
+
 	ret = TEMP_FAILURE_RETRY(statfs(dst, &e4bst->dst_fsinfo));
 	if (ret) {
 		utils_perr("statfs() failed for destination dir");
@@ -330,7 +334,8 @@ int init_state(const char* src_in, const char* dst_in, int opts, struct e4b_stat
 
 	/* Make sure there is enough space on dst */
 	utils_info("Data length: %s\n", print_size(e4bst->data_len));
-	if ((e4bst->dst_fsinfo.f_bavail * e4bst->dst_fsinfo.f_frsize) < e4bst->data_len) {
+	if (((e4bst->dst_fsinfo.f_bavail * e4bst->dst_fsinfo.f_frsize) < e4bst->data_len) &&
+	   !(opts & (E4B_OPT_NO_DATA | E4B_OPT_NO_SPACE_CHECK))) {
 		utils_err("Not enough space on destination filesystem\n");
 		utils_err("Required: %s\n", print_size(e4bst->data_len));
 		utils_err("Available: %s\n", print_size(e4bst->dst_fsinfo.f_bavail *

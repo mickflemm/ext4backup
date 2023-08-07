@@ -5,7 +5,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
- 
+
 #include "ext4backup.h"
 #include <stddef.h>	/* For NULL */
 #include <unistd.h>	/* For geteuid() */
@@ -37,6 +37,7 @@ void usage(const char *self)
 	utils_info("\t--force-update\tAlways update files on destination if they exist\n");
 	utils_info("\t--copy-encrypted\tAssume all encrypted files in source hierarchy are unlocked\n");
 	utils_info("\t--keep-going\tContinue on failure instead of exiting\n");
+	utils_info("\t--no-space-check\tIgnore the check for enough free space on target\n");
 
 	utils_info("\nNotes:\n");
 	utils_info("* The programm will not cross filesystem boundaries, anything mounted on the source hierarchy will be ignored\n");
@@ -71,6 +72,7 @@ static const struct option options[] = {
 	{"force-update",	no_argument, NULL, E4B_OPT_FORCE_UPDATE},
 	{"copy-encrypted",	no_argument, NULL, E4B_OPT_COPY_ENCRYPTED},
 	{"keep-going",		no_argument, NULL, E4B_OPT_KEEP_GOING},
+	{"no-space-check",	no_argument, NULL, E4B_OPT_NO_SPACE_CHECK},
 	{0,			0,	     0,	   0}
 };
 
@@ -124,7 +126,7 @@ int main(int argc, char *argv[])
 	} else {
 		utils_err("Invalid arguments\n");
 		usage(argv[0]);
-		exit(EXIT_FAILURE);	
+		exit(EXIT_FAILURE);
 	}
 
 	utils_ann("\t--== ext4backup version %s ==--\n\n", VERSION);
@@ -160,13 +162,13 @@ int main(int argc, char *argv[])
 			utils_wrn("\n* CAP_CHOWN not available\n");
 			utils_wrn("will not be able to preserve ownership for files not owned by us\n");
 		}
-		
+
 		cap_get_flag(caps, CAP_DAC_OVERRIDE, CAP_EFFECTIVE, &cap_val);
 		if (cap_val == CAP_CLEAR) {
 			utils_wrn("\n* CAP_DAC_OVERRIDE not available\n");
 			utils_wrn("will not be able to bypass permission checks when accessing files not owned by us\n");
 		}
-		
+
 		/* Note: Even if we hanlded O_NOATIME for files not owned by the user, it's also
 		 * impossible to set attrs,xattrs etc and checking uids all the time will complicate
 		 * the code, leave it like this for now. */
@@ -175,14 +177,14 @@ int main(int argc, char *argv[])
 			utils_wrn("\n* CAP_FOWNER not available\n");
 			utils_wrn("will not be able to process files not owned by us\n");
 		}
-		
+
 		cap_get_flag(caps, CAP_LINUX_IMMUTABLE, CAP_EFFECTIVE, &cap_val);
 		if (cap_val == CAP_CLEAR && !(opts & E4B_OPT_NO_IMMUTABLES)) {
 			utils_wrn("\n* CAP_LINUX_IMMUTABLE not available\n");
 			utils_wrn("will not preserve the immutable flag\n");
 			opts |= E4B_OPT_NO_IMMUTABLES;
 		}
-		
+
 		cap_get_flag(caps, CAP_MKNOD, CAP_EFFECTIVE, &cap_val);
 		if (cap_val == CAP_CLEAR && !(opts & E4B_OPT_NO_SPECIAL)) {
 			utils_wrn("\n* CAP_MKNOD not available\n");
@@ -228,11 +230,11 @@ int main(int argc, char *argv[])
 		} else
 			st->src_frozen = false;
 	}
-	
+
 	ret = update_subdirs(st);
 	if (ret)
 		goto cleanup;
-	
+
 	ret = update_immutables(st);
 	if (ret)
 		goto cleanup;

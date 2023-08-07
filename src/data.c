@@ -141,7 +141,7 @@ ssize_t copy_data(struct e4b_entry *entry)
  cleanup:
 	if (ret) {
 		close(src_fd);
-		close(dst_fd);	
+		close(dst_fd);
 	}
 	return ret;
 }

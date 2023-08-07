@@ -5,7 +5,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
- 
+
 /* For *at functions, nftw() */
 #define _POSIX_C_SOURCE 200809L
 
@@ -87,7 +87,8 @@ enum e4b_opts {
 	E4B_OPT_EXT4_FSTIMES	= (1 << 12),
 	E4B_OPT_FORCE_UPDATE	= (1 << 13),
 	E4B_OPT_COPY_ENCRYPTED	= (1 << 14),
-	E4B_OPT_KEEP_GOING	= (1 << 15)
+	E4B_OPT_KEEP_GOING	= (1 << 15),
+	E4B_OPT_NO_SPACE_CHECK	= (1 << 16)
 };
 
 struct e4b_entry {
