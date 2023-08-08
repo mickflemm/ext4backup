@@ -64,7 +64,13 @@ static int process_entry(struct e4b_entry *entry)
 	}
 
 	/* Check if the destination exists and if it needs updating */
-	ret = get_path_info(entry->path, st->dst_dirfd, dst_info, true);
+
+	/* Already initialized during init_state() (file exists on target)*/
+	if (dst_info->stx_mask)
+		ret = 0;
+	else
+		ret = get_path_info(entry->path, st->dst_dirfd, dst_info, true);
+
 	if (ret != 0) {
 		if (ret != ENOENT)
 			return ret;

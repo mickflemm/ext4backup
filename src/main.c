@@ -38,6 +38,8 @@ void usage(const char *self)
 	utils_info("\t--copy-encrypted\tAssume all encrypted files in source hierarchy are unlocked\n");
 	utils_info("\t--keep-going\tContinue on failure instead of exiting\n");
 	utils_info("\t--no-space-check\tIgnore the check for enough free space on target\n");
+	utils_info("\t--purge-excess\tPurge excess files/directories from target hierarchy\n");
+	utils_info("\t--ignore-target\tIgnore target hierarchy (also implies no-space and ignores purge-excess)");
 
 	utils_info("\nNotes:\n");
 	utils_info("* The programm will not cross filesystem boundaries, anything mounted on the source hierarchy will be ignored\n");
@@ -73,6 +75,8 @@ static const struct option options[] = {
 	{"copy-encrypted",	no_argument, NULL, E4B_OPT_COPY_ENCRYPTED},
 	{"keep-going",		no_argument, NULL, E4B_OPT_KEEP_GOING},
 	{"no-space-check",	no_argument, NULL, E4B_OPT_NO_SPACE_CHECK},
+	{"purge-excess",	no_argument, NULL, E4B_OPT_PURGE_EXCESS},
+	{"ignore-target",	no_argument, NULL, E4B_OPT_IGNORE_TARGET | E4B_OPT_NO_SPACE_CHECK},
 	{0,			0,	     0,	   0}
 };
 
@@ -240,6 +244,10 @@ int main(int argc, char *argv[])
 		goto cleanup;
 
 	ret = update_ext4_fstimes(st);
+	if (ret)
+		goto cleanup;
+
+	ret = purge_excess(st);
 	if (ret)
 		goto cleanup;
 

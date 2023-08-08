@@ -52,13 +52,16 @@ struct e4b_state {
 	int src_dirfd;
 	bool src_frozen;
 	char *dst;
+	int dst_len;
 	int dst_dirfd;
 	off_t data_len;
+	off_t existing_data_len;
 	uint32_t opts;
 	int num_entries;
 	int entries_processed;
 	struct statfs src_fsinfo;
 	struct statfs dst_fsinfo;
+	GHashTable *existing;
 	GList *entries;
 	GList *subdirs;
 	GList *immutables;
@@ -88,7 +91,9 @@ enum e4b_opts {
 	E4B_OPT_FORCE_UPDATE	= (1 << 13),
 	E4B_OPT_COPY_ENCRYPTED	= (1 << 14),
 	E4B_OPT_KEEP_GOING	= (1 << 15),
-	E4B_OPT_NO_SPACE_CHECK	= (1 << 16)
+	E4B_OPT_NO_SPACE_CHECK	= (1 << 16),
+	E4B_OPT_PURGE_EXCESS	= (1 << 17),
+	E4B_OPT_IGNORE_TARGET	= (1 << 18)
 };
 
 struct e4b_entry {
@@ -142,4 +147,5 @@ int copy_metadata(struct e4b_entry *entry);
 int update_subdirs(struct e4b_state *st);
 int process_entries(struct e4b_state *st);
 
-
+/* Purge excess files/directories on target */
+int purge_excess(struct e4b_state *st);
