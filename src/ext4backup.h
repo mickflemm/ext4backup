@@ -42,7 +42,7 @@
 /* Defined on include/linux/statfs.h */
 #define ST_RDONLY 0x0001
 
-#define VERSION "0.1"
+#define VERSION "0.2"
 
 #define XATTR_CONF_PATH	"/etc/xattr.conf"
 
