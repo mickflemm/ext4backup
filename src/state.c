@@ -430,10 +430,11 @@ int init_state(const char* src_in, const char* dst_in, int opts, struct e4b_stat
 		goto cleanup;
 	}
 
-#ifdef DEBUG
-	utils_dbg("Excess files/directories on target:\n");
-	g_hash_table_foreach (e4bst->existing, print_existing, NULL);
-#endif
+	if (!(e4bst->opts & E4B_OPT_PURGE_EXCESS)) {
+		/* No need to keep the hashtable around, clean it up. */
+		g_hash_table_destroy(e4bst->existing);
+		e4bst->existing = NULL;
+	}
 
 	/* On init_entry() we prepend entries to the list so that we don't have
 	 * to walk it each time, time to reverse it to get the entries in order. */
