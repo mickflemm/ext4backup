@@ -52,7 +52,8 @@ struct e4b_entry* alloc_src_entry(int trimed_pathlen)
 void free_src_entry(void* in)
 {
 	struct e4b_entry *e = (struct e4b_entry *) in;
-	free(e->path);
+	if (e->path)
+		free(e->path);
 	free(e);
 }
 
@@ -255,6 +256,15 @@ static void prepare_entry(gpointer data, gpointer user_data)
 		return;
 
 	utils_dbg("File %s exists on target\n", entry->path);
+
+	/* If we don't do updates clear the path of this entry so that
+	 * we skip it during processing */
+	if (st->opts & E4B_OPT_NO_UPDATE) {
+		free(entry->path);
+		entry->path = NULL;
+		return;
+	}
+
 	memcpy(&entry->dst_info, dst_info, sizeof(struct statx));
 
 	st->existing_data_len += dst_info->stx_size;

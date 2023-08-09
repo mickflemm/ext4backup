@@ -23,13 +23,13 @@ void usage(const char *self)
 	utils_info("\t--non-recursive\tIgnore subdirectories\n");
 	utils_info("\t--skip-data\tDo not copy file contents\n");
 	utils_info("\t--skip-metadata\tDo not preserve file metadata\n");
-	utils_info("\t\t\t(also sets --skip-attrs/xattrs/acl and ignores ext4-fstimes)\n");
-	utils_info("\t--skip-updates\tDo not update existing files\n");
+	utils_info("\t\t\t(also sets skip-attrs/xattrs/acl and ignores ext4-fstimes)\n");
+	utils_info("\t--skip-updates\tDo not update existing files (ignores force-update)\n");
 	utils_info("\t--no-hardlinks\tDo not attempt to preserve hardlinks on destination hierarchy\n");
 	utils_info("\t--skip-special\tDo not copy special files (devices, sockets, fifos)\n");
 	utils_info("\t--skip-attrs\tDo not preserve file attributes (see chattr(1))\n");
 	utils_info("\t--no-immutables\tDo not preserve the immutable flag (see chattr(1))\n");
-	utils_info("\t--no-fsfreeze\tDo not attempt to freeze filesystems\n");
+	utils_info("\t--no-fsfreeze\tDo not attempt to freeze filesystems (ignores ext4-fstimes)\n");
 	utils_info("\t--skip-xattrs\tDo not preserve extended file attributes (see xattr(7))\n");
 	utils_info("\t--skip-acl\tDo not preserve \"POSIX\" ACLs (see acl(5))\n");
 	utils_info("\t--ignore-nodump\tIgnore the NODUMP attribute (see chattr(5) option d) and copy marked files anyway\n");
@@ -60,7 +60,7 @@ void usage(const char *self)
 static const struct option options[] = {
 	{"non-recursive",	no_argument, NULL, E4B_OPT_NONRECURSIVE},
 	{"skip-data",		no_argument, NULL, E4B_OPT_NO_DATA},
-	{"skip-metadata",	no_argument, NULL, E4B_OPT_NO_METADATA},
+	{"skip-metadata",	no_argument, NULL, E4B_OPT_NO_METADATA | E4B_OPT_NO_ATTRS | E4B_OPT_NO_XATTRS | E4B_OPT_NO_ACL},
 	{"skip-updates",	no_argument, NULL, E4B_OPT_NO_UPDATE},
 	{"no-hardlinks",	no_argument, NULL, E4B_OPT_NO_HARDLINKS},
 	{"skip-special",	no_argument, NULL, E4B_OPT_NO_SPECIAL},
@@ -134,6 +134,19 @@ int main(int argc, char *argv[])
 	}
 
 	utils_ann("\t--== ext4backup version %s ==--\n\n", VERSION);
+
+	/* Sanitize flags */
+	if ((opts & E4B_OPT_FORCE_UPDATE) && (opts & E4B_OPT_NO_UPDATE))
+		opts &= ~E4B_OPT_FORCE_UPDATE;
+
+	if ((opts & E4B_OPT_NO_METADATA) && (opts & E4B_OPT_EXT4_FSTIMES))
+		opts &= ~E4B_OPT_EXT4_FSTIMES;
+
+	if ((opts & E4B_OPT_NO_FSFREEZE) && (opts & E4B_OPT_EXT4_FSTIMES))
+		opts &= ~E4B_OPT_EXT4_FSTIMES;
+
+	if ((opts & E4B_OPT_IGNORE_TARGET) && (opts & E4B_OPT_PURGE_EXCESS))
+		opts &= ~E4B_OPT_PURGE_EXCESS;
 
 	/* Drop privileges if we are root */
 	caps = cap_get_proc();

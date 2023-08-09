@@ -52,7 +52,7 @@ int purge_excess(struct e4b_state *st)
 {
 	GList *sorted = NULL;
 
-	if (!st->existing)
+	if (!st->existing || !(st->opts & E4B_OPT_PURGE_EXCESS))
 		return 0;
 
 	sorted = g_hash_table_get_keys(st->existing);

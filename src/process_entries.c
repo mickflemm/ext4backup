@@ -51,6 +51,10 @@ static int process_entry(struct e4b_entry *entry)
 	int dst_open_flags = 0;
 	int ret = 0;
 
+	/* Cleared entry, skip it */
+	if (!entry->path)
+		return 0;
+
 	utils_dbg("\nCopying from: \n\t%s/%s\nto:\n\t%s/%s\n",
 		  st->src, entry->path, st->dst, entry->path);
 
