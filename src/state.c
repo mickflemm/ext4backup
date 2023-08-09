@@ -18,189 +18,253 @@
 #include <glib.h>	/* For GList/GHashtable */
 #include <errno.h>	/* For error codes */
 #include <string.h>	/* For strnlen(), memset(), strncpy() */
+#include <fts.h>	/* For fts() */
+
+/*********\
+* HELPERS *
+\*********/
+
+struct e4b_entry* alloc_src_entry(int trimed_pathlen)
+{
+	int entry_len = sizeof(struct e4b_entry) + trimed_pathlen + 1;
+	struct e4b_entry *e = NULL;
+	char *path = NULL;
+
+	e = malloc(sizeof(struct e4b_entry));
+	if (!e) {
+		errno = ENOMEM;
+		return NULL;
+	}
+	memset(e, 0, sizeof(struct e4b_entry));
+
+	path = malloc(trimed_pathlen + 1);
+	if (!path) {
+		free(e);
+		errno = ENOMEM;
+		return NULL;
+	}
+	memset(path, 0, trimed_pathlen + 1);
+
+	e->path = path;
+	return e;
+}
+
+void free_src_entry(void* in)
+{
+	struct e4b_entry *e = (struct e4b_entry *) in;
+	free(e->path);
+	free(e);
+}
 
 /*****************\
 * STATE INIT/FREE *
 \*****************/
 
-/* We use this since we can't pass a user argument to nftw */
-static struct e4b_state *e4bst = NULL;
-
-static int init_entry(const char *filepath, const struct stat *info,
-		      const int typeflag, struct FTW *pathinfo)
+static int traverse_file_hierarchy(struct e4b_state *st, const char* rootpath, bool source)
 {
-	struct statx src_info = {0};
-	struct e4b_entry *entry = NULL;
+	FTS *fs_stream = NULL;
+	FTSENT *fs_stream_entry = NULL;
+	struct statx stx_tmp = {0};
+	char* paths[2] = { (char*) rootpath, NULL };
+	int fts_opts = FTS_PHYSICAL | FTS_NOCHDIR | FTS_NOSTAT | (source ? FTS_XDEV : 0);
 	const char *trimed = NULL;
-	int entry_pathlen = 0;
-	int entry_len = 0;
-	int ret = FTW_CONTINUE;
-
-	if (!filepath || !info || !pathinfo) {
-		utils_err("Missing arguments to init_entry()\n");
-		errno = EINVAL;
-		return FTW_STOP;
-	}
-
-	/* Don't add the source directory itself to the list */
-	if (!pathinfo->level)
-		return FTW_CONTINUE;
-
-	/* If NONRECURSIVE was requested skip any subdirectories */
-	if ((typeflag == FTW_D) && (pathinfo->level > 0)
-	    && (e4bst->opts & E4B_OPT_NONRECURSIVE))
-		return FTW_SKIP_SUBTREE;
-
-	/* Get more infos about the file using statx */
-	ret = get_path_info(filepath, 0, &src_info, 0);
-	if (ret) {
-		errno = ret;
-		return FTW_STOP;
-	}
-
-	/* Handle files/directories marked with NODUMP */
-	if ((src_info.stx_attributes & STATX_ATTR_NODUMP) &&
-	    !(e4bst->opts & E4B_OPT_IGNORE_NODUMP)) {
-		utils_wrn("Skipping path marked with NODUMP: %s\n", filepath);
-		if (typeflag == FTW_D)
-			return FTW_SKIP_SUBTREE;
-		else
-			return FTW_CONTINUE;
-	}
-
-	/* Skip encrypted files that we can't process */
-	/* Note: We can't handle encrypted files with the current user API,
-	 * for regular files we can try and open them and fail with ENOKEY,
-	 * for directories we can open them and use ioctls to see if the key
-	 * used for their encryption is present, but for symlinks we can do
-	 * nothing (ioctl doesn't accept O_PATH descriptors). According to
-	 * the docs there will be an API for backing up encrypted files
-	 * but it's not there yet. So for now warn the user and let the
-	 * user copy the encrypted files manualy after adding the key to
-	 * the keyring/unlocking them. As an alternative, check for the
-	 * E4B_OPT_COPY_ENCRYPTED option and assume the user has already
-	 * provided the encryption keys needed. */
-	if (src_info.stx_attributes & STATX_ATTR_ENCRYPTED &&
-	    !(e4bst->opts & E4B_OPT_COPY_ENCRYPTED)) {
-		if (typeflag == FTW_D) {
-			utils_wrn("Skipping encrypted directory: %s\n", filepath);
-			return FTW_SKIP_SUBTREE;
-		}
-		utils_wrn("Skipping encrypted file: %s\n", filepath);
-		return FTW_CONTINUE;
-	}
-
-	trimed = filepath + e4bst->src_len + 1;
-	entry_pathlen = strnlen(trimed, PATH_MAX);
-	entry_len = sizeof(struct e4b_entry) + entry_pathlen + 1;
-
-	entry = malloc(entry_len);
-	if (!entry) {
-		utils_perr("Could not allocate entry");
-		errno = ENOMEM;
-		return FTW_STOP;
-	}
-	memset(entry, 0, entry_len);
-	entry->st = e4bst;
-	strncpy(entry->path, trimed, entry_pathlen + 1);
-	memcpy(&entry->src_info, &src_info, sizeof(struct statx));
-	entry->depth = pathinfo->level;
-
-	/* pathinfo->base is the offset of the basename component on
-	 * filepath, since we strip the source directory part from filepath
-	 * on entry->path, we do the same for entry->base. */
-	entry->base = pathinfo->base - (e4bst->src_len + 1);
-
-	/* Note: prepend instead of append, to avoid the need to
-	 * traverse the list on every addition, we'll reverse the
-	 * list afterwards. */
-	e4bst->entries = g_list_prepend(e4bst->entries, (gpointer) entry);
-	e4bst->num_entries++;
-	e4bst->data_len += info->st_size;
-
-	if (e4bst->existing) {
-		struct statx *tmp = g_hash_table_lookup(e4bst->existing, entry->path);
-		if (tmp != NULL) {
-			utils_dbg("Got stored dst_info for: %s\n\n", entry->path);
-			memcpy(&entry->dst_info, tmp, sizeof(struct statx));
-			e4bst->existing_data_len += tmp->stx_size;
-			/* Remove it from st->existing so that when we are done processing entries,
-			 * st->existing includes only excess files in the target hierarchy. */
-			if (e4bst->opts & E4B_OPT_PURGE_EXCESS) {
-				utils_dbg("Removed from existing: %s\n", entry->path);
-				g_hash_table_remove(e4bst->existing, entry->path);
-			}
-		}
-	}
-
-	return FTW_CONTINUE;
-}
-
-static int register_existing(const char *filepath, const struct stat *info,
-		      const int typeflag, struct FTW *pathinfo)
-{
-	const char *trimed = NULL;
-	char *path = NULL;
-	int pathlen = 0;
-	struct statx *dst_info = NULL;
+	int trimed_pathlen = 0;
 	int ret = 0;
 
-	if (!filepath || !info || !pathinfo) {
-		utils_err("Missing arguments to register_existing()\n");
-		errno = EINVAL;
-		return FTW_STOP;
+	fs_stream = fts_open(paths, fts_opts, NULL);
+	if (!fs_stream) {
+		utils_err("fts_open() failed on %s hierarchy: %s\n",
+				  (source ? "source" : "target"), strerror(errno));
+		return errno;
 	}
 
-	/* Don't add the source directory itself to the list */
-	if (!pathinfo->level)
-		return FTW_CONTINUE;
+	/* Walk the tree and add entries to the source/destination list
+	 * depending on the source switch */
+	while ((fs_stream_entry = fts_read(fs_stream)) && (fs_stream_entry != NULL))
+	{
+		switch (fs_stream_entry->fts_info) {
+		case FTS_D:
+			/* Ignore the root directory, we only care about its contents */
+			if (!fs_stream_entry->fts_level)
+				continue;
+			/* If a non-recursive walk was requested skip any subdirs */
+			if (fs_stream_entry->fts_level > 0 && (st->opts & E4B_OPT_NONRECURSIVE)) {
+				utils_dbg("Ignoring subdir: %s\n", fs_stream_entry->fts_path);
+				ret = fts_set(fs_stream, fs_stream_entry, FTS_SKIP);
+				if (ret == -1) {
+					utils_perr("fts_set() failed");
+					fts_close(fs_stream);
+					return errno;
+				}
+				continue;
+			}
+			/* The following checks only apply to source, we ignore them on target */
+			if (!source)
+				continue;
+			/* We need to do a statx now to check the directory's attributes */
+			ret = get_path_info(fs_stream_entry->fts_path, 0, &stx_tmp, 0);
+			if (ret) {
+				fts_close(fs_stream);
+				return ret;
+			}
+			/* If the directory is marked with NODUMP and we obey NODUMP, skip it */
+			if ((stx_tmp.stx_attributes & STATX_ATTR_NODUMP) &&
+				!(st->opts & E4B_OPT_IGNORE_NODUMP)) {
+					utils_dbg("Ignoring subdir marked with nodump: %s\n",
+							  fs_stream_entry->fts_path);
+					ret = fts_set(fs_stream, fs_stream_entry, FTS_SKIP);
+					if (ret == -1) {
+						utils_perr("fts_set() failed");
+						fts_close(fs_stream);
+						return errno;
+					}
+			}
+			/* Skip encrypted dirs that we can't process */
+			/* Note: We can't handle encrypted files with the current user API,
+			 * for regular files we can try and open them and fail with ENOKEY,
+			 * for directories we can open them and use ioctls to see if the key
+			 * used for their encryption is present, but for symlinks we can do
+			 * nothing (ioctl doesn't accept O_PATH descriptors). According to
+			 * the docs there will be an API for backing up encrypted files
+			 * but it's not there yet. So for now warn the user and let the
+			 * user copy the encrypted files manualy after adding the key to
+			 * the keyring/unlocking them. As an alternative, check for the
+			 * E4B_OPT_COPY_ENCRYPTED option and assume the user has already
+			 * provided the encryption keys needed. */
+			if ((stx_tmp.stx_attributes & STATX_ATTR_ENCRYPTED) &&
+				!(st->opts & E4B_OPT_COPY_ENCRYPTED)) {
+					utils_dbg("Ignoring encrypted subdir: %s\n",
+							  fs_stream_entry->fts_path);
+					ret = fts_set(fs_stream, fs_stream_entry, FTS_SKIP);
+					if (ret == -1) {
+						utils_perr("fts_set() failed");
+						fts_close(fs_stream);
+						return errno;
+					}
+			}
+			/* We don't care for ordering in case of the target hierarchy, since
+			 * we'll use a hashtable, but for the source hierarchy in the end we
+			 * want to be sure that we'll see directories before their contents,
+			 * so that we can re-create them in the target. However to avoid
+			 * appending the entries to glist (see below), and walking the whole
+			 * list every time, it makes more sense to prepend them, and to avoid
+			 * reversing the list afterwards we add the directories after their
+			 * contents here, so continue for FTS_D and break for FTS_DP. */
+			continue;
+		case FTS_DP:
+			if (!fs_stream_entry->fts_level)
+				continue;
+			else
+				break;
+		case FTS_DEFAULT:
+			/* This is not a regular file/directory/symlink, if user doesn't care
+			 * about special files, ignore it. */
+			if (st->opts & E4B_OPT_NO_SPECIAL)
+				continue;
+		case FTS_DNR:
+		case FTS_ERR:
+			utils_err("Error when visiting: %s\n\t%s\n", fs_stream_entry->fts_path,
+					  strerror(fs_stream_entry->fts_errno));
+			if (st->opts & E4B_OPT_KEEP_GOING)
+				continue;
+			else {
+				fts_close(fs_stream);
+				return fs_stream_entry->fts_errno;
+			}
+		default:
+			break;
+		}
 
-	/* If NONRECURSIVE was requested skip any subdirectories */
-	if ((typeflag == FTW_D) && (pathinfo->level > 0)
-	    && (e4bst->opts & E4B_OPT_NONRECURSIVE))
-		return FTW_SKIP_SUBTREE;
+		/* Note: https://bugzilla.kernel.org/show_bug.cgi?id=216275 */
+		trimed = fs_stream_entry->fts_path + (source ? st->src_len : st->dst_len) + 1;
+		trimed_pathlen = strnlen(trimed, PATH_MAX);
+		utils_dbg("Got file on %s: %s\n", (source ? "source" : "target"), trimed);
 
-	/* Get more infos about the file using statx */
-	dst_info = malloc(sizeof(struct statx));
-	if (!dst_info) {
-		utils_perr("Could not allocate dst_info");
-		errno = ENOMEM;
-		return FTW_STOP;
+		/* For the source hierarchy create the e4b_entry objects we'll use for copying,
+		 * for the target hierarchy we only need a copy of the path and a struct statx. */
+		if (source) {
+			struct e4b_entry *entry = NULL;
+			struct statx *src_info = NULL;
+
+			entry = alloc_src_entry(trimed_pathlen);
+			if (!entry) {
+				utils_perr("Could not allocate entry");
+				fts_close(fs_stream);
+				return ENOMEM;
+			}
+
+			entry->st = st;
+			entry->depth = fs_stream_entry->fts_level;
+			entry->base = trimed_pathlen - fs_stream_entry->fts_namelen;
+
+			src_info = &entry->src_info;
+			strncpy(entry->path, trimed, trimed_pathlen + 1);
+			ret = get_path_info(fs_stream_entry->fts_path, 0, src_info, 0);
+			if (ret) {
+				free(entry);
+				fts_close(fs_stream);
+				return ret;
+			}
+
+			st->entries = g_list_prepend(st->entries, (gpointer) entry);
+			st->num_entries++;
+			st->data_len += src_info->stx_size;
+		} else {
+			char* dst_path = NULL;
+			struct statx *dst_info = NULL;
+			dst_path = malloc(trimed_pathlen + 1);
+			if (!dst_path) {
+				utils_perr("Could not allocate dst_path");
+				fts_close(fs_stream);
+				return ENOMEM;
+			}
+			dst_info = malloc(sizeof(struct statx));
+			if (!dst_info) {
+				utils_perr("Could not allocate stx_copy");
+				free(dst_path);
+				fts_close(fs_stream);
+				return ENOMEM;
+			}
+			strncpy(dst_path, trimed, trimed_pathlen + 1);
+			ret = get_path_info(fs_stream_entry->fts_path, 0, dst_info, 0);
+			if (ret) {
+				free(dst_path);
+				free(dst_info);
+				fts_close(fs_stream);
+				return ret;
+			}
+			g_hash_table_insert(st->existing, (void*) dst_path, dst_info);
+		}
 	}
 
-	ret = get_path_info(filepath, 0, dst_info, 0);
-	if (ret) {
-		errno = ret;
-		return FTW_STOP;
-	}
-
-	trimed = filepath + e4bst->dst_len + 1;
-	pathlen = strnlen(trimed, PATH_MAX) + 1;
-
-	path = malloc(pathlen);
-	if (!path) {
-		utils_perr("Could not allocate path");
-		errno = ENOMEM;
-		return FTW_STOP;
-	}
-	strncpy(path, trimed, pathlen);
-
-	g_hash_table_insert(e4bst->existing, (void*) path, dst_info);
-	return FTW_CONTINUE;
+	fts_close(fs_stream);
+	return 0;
 }
 
-#ifdef DEBUG
-static void print_entry(gpointer data, gpointer user_data)
+static void prepare_entry(gpointer data, gpointer user_data)
 {
-	struct e4b_entry *entry = (struct e4b_entry *)data;
-	utils_dbg("Filename: %s\n", entry->path);
-}
+	struct e4b_entry *entry = (struct e4b_entry *) data;
+	struct e4b_state *st = (struct e4b_state *) user_data;
+	struct statx *dst_info = NULL;
 
-static void print_existing(gpointer key, gpointer value, gpointer user_data)
-{
-	utils_dbg("Existing: %s\n", (char*) key);
+	utils_dbg("Filename: %s, base: %i, depth: %i\n", entry->path, entry->base, entry->depth);
+
+	/* Check if the same file exists on target and grab dst_info */
+	dst_info = g_hash_table_lookup(st->existing, entry->path);
+	if (!dst_info)
+		return;
+
+	utils_dbg("File %s exists on target\n", entry->path);
+	memcpy(&entry->dst_info, dst_info, sizeof(struct statx));
+
+	st->existing_data_len += dst_info->stx_size;
+
+	/* If purge was requested remove any files from st->existing
+	 * that also exist on source, so that st->existing only contains
+	 * excess files after we are done. */
+	if (st->opts & E4B_OPT_PURGE_EXCESS)
+		g_hash_table_remove(st->existing, entry->path);
 }
-#endif
 
 static void clear_state(struct e4b_state *st)
 {
@@ -222,7 +286,7 @@ static void clear_state(struct e4b_state *st)
 	if (st->unsupported_xattrs)
 		g_hash_table_destroy(st->unsupported_xattrs);
 	if (st->entries)
-		g_list_free_full(st->entries, free);
+		g_list_free_full(st->entries, free_src_entry);
 	/* Note: entries are re-used on subdirs and immutables */
 	if (st->subdirs)
 		g_list_free(st->subdirs);
@@ -234,6 +298,7 @@ static void clear_state(struct e4b_state *st)
 
 int init_state(const char* src_in, const char* dst_in, int opts, struct e4b_state **st)
 {
+	struct e4b_state *e4bst = NULL;
 	struct statx src_info = { 0 };
 	struct statx dst_info = { 0 };
 	char* src = NULL;
@@ -395,50 +460,37 @@ int init_state(const char* src_in, const char* dst_in, int opts, struct e4b_stat
 
 	if (!(opts & E4B_OPT_IGNORE_TARGET)) {
 		e4bst->dst_len = strnlen(dst, PATH_MAX);
-		/* Initialize the hashtable for tracking existing files/directories on target. */
+		/* Initialize the hashtable for tracking existing files/directories on target, and
+		 * populate it. */
 		e4bst->existing = g_hash_table_new_full(g_str_hash, g_str_equal, free, free);
-		ret = nftw(e4bst->dst, register_existing, max_fds, FTW_PHYS | FTW_MOUNT | FTW_ACTIONRETVAL);
-		if (ret < 0) {
-			utils_perr("Could not traverse target hierarchy, nftw() failed");
-			if (e4bst->opts & E4B_OPT_PURGE_EXCESS) {
-				e4bst->opts &= ~E4B_OPT_PURGE_EXCESS;
-				utils_wrn("Will not purge excess files/directories from target hierarchy\n");
-			}
-		} else if (ret > 0) {
+		ret = traverse_file_hierarchy(e4bst, dst, 0);
+		if (ret) {
 			utils_err("Could not traverse target hierarchy\n");
 			if  (e4bst->opts & E4B_OPT_PURGE_EXCESS) {
 				e4bst->opts &= ~E4B_OPT_PURGE_EXCESS;
 				utils_wrn("Will not purge excess files/directories from target hierarchy\n");
 			}
 		}
-#ifdef DEBUG
-		g_hash_table_foreach (e4bst->existing, print_existing, NULL);
-#endif
 	} else {
+		e4bst->opts &= ~E4B_OPT_PURGE_EXCESS;
 		e4bst->existing = NULL;
 		e4bst->existing_data_len = 0;
 	}
 
-	ret = nftw(e4bst->src, init_entry, max_fds, FTW_PHYS | FTW_MOUNT | FTW_ACTIONRETVAL);
-	if (ret < 0) {
-		utils_perr("Could not traverse source hierarchy, nftw() failed");
-		ret = errno;
-		goto cleanup;
-	} else if (ret > 0) {
+	ret = traverse_file_hierarchy(e4bst, src, 1);
+	if (ret) {
 		utils_err("Could not traverse source hierarchy\n");
 		ret = errno;
 		goto cleanup;
 	}
+
+	g_list_foreach(e4bst->entries, prepare_entry, e4bst);
 
 	if (!(e4bst->opts & E4B_OPT_PURGE_EXCESS)) {
 		/* No need to keep the hashtable around, clean it up. */
 		g_hash_table_destroy(e4bst->existing);
 		e4bst->existing = NULL;
 	}
-
-	/* On init_entry() we prepend entries to the list so that we don't have
-	 * to walk it each time, time to reverse it to get the entries in order. */
-	e4bst->entries = g_list_reverse(e4bst->entries);
 
 	/* Make sure there is enough space on dst */
 	utils_info("Data length: %s\n", print_size(e4bst->data_len));
@@ -466,10 +518,6 @@ int init_state(const char* src_in, const char* dst_in, int opts, struct e4b_stat
 
 	/* Initialize list of xattr patterns to ignore, from /etc/xattr.conf */
 	ret = fill_skip_xattr_patterns(e4bst);
-
-#ifdef DEBUG
-	g_list_foreach(e4bst->entries, print_entry, NULL);
-#endif
 
 	ret = 0;
 

@@ -65,7 +65,7 @@ static int process_entry(struct e4b_entry *entry)
 
 	/* Check if the destination exists and if it needs updating */
 
-	/* Already initialized during init_state() (file exists on target)*/
+	/* Already initialized during init_state() (file exists on target) */
 	if (dst_info->stx_mask)
 		ret = 0;
 	else

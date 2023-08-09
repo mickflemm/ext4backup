@@ -104,7 +104,7 @@ struct e4b_entry {
 	int src_fd;
 	struct statx dst_info;
 	int dst_fd;
-	char path[];
+	char *path;
 };
 
 /* Prototypes */
