@@ -126,6 +126,7 @@ char *get_sanitized_lnk_path(struct e4b_entry *entry, struct e4b_state *st);
 int get_path_info(const char *path, int fd, struct statx *buf, bool may_not_exist);
 char *get_lnk_path(struct e4b_entry *entry, struct e4b_state *st, int dst, int *pathlen);
 int check_lnk_path_match(struct e4b_entry *entry, struct e4b_state *st);
+int is_key_available(char* path);
 int set_fs_freeze(char* path, bool freeze);
 int update_ext4_fstimes(struct e4b_state *st);
 

@@ -198,6 +198,81 @@ static int get_mountpoint_len(const char *path_in) {
 }
 
 /******************\
+* FSCRYPT HANDLING *
+\******************/
+
+int is_key_available(char* path)
+{
+	struct fscrypt_get_policy_ex_arg policy_req = {0};
+	struct fscrypt_get_key_status_arg key_status_req = {0};
+	int ret = 0;
+
+	/* Open path (directory) and grab its encryption policy */
+	int fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd == -1) {
+		utils_err("Could not open directory for checking encryption policy: %s\n", path);
+		utils_perr("open() failed");
+		return fd;
+	}
+
+	policy_req.policy_size = sizeof(policy_req.policy);
+	ret = ioctl(fd, FS_IOC_GET_ENCRYPTION_POLICY_EX, &policy_req);
+	close(fd);
+	if (ret == -1) {
+		utils_err("Could not get encryption policy for: %s\n", path);
+		utils_perr("ioctl() failed");
+		return ret;
+	}
+
+	/* Use the key descriptor/identifier on mountpoint to get key status */
+	int mountpoint_len = get_mountpoint_len(path);
+	/* Temporarily terminate path at mountpoint_len */
+	char saved = path[mountpoint_len];
+	path[mountpoint_len] = '\0';
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd == -1) {
+		utils_err("Could not open mountpoint for checking key status: %s\n", path);
+		path[mountpoint_len] = saved;
+		utils_perr("open() failed");
+		return fd;
+	}
+	path[mountpoint_len] = saved;
+
+	if (policy_req.policy.version == FSCRYPT_POLICY_V1) {
+		key_status_req.key_spec.type = FSCRYPT_KEY_SPEC_TYPE_DESCRIPTOR;
+		memcpy(&key_status_req.key_spec.u.descriptor,
+		       &policy_req.policy.v1.master_key_descriptor,
+		       FSCRYPT_KEY_DESCRIPTOR_SIZE);
+	} else if (policy_req.policy.version == FSCRYPT_POLICY_V2) {
+		key_status_req.key_spec.type = FSCRYPT_KEY_SPEC_TYPE_IDENTIFIER;
+		memcpy(&key_status_req.key_spec.u.identifier,
+		       &policy_req.policy.v2.master_key_identifier,
+		       FSCRYPT_KEY_IDENTIFIER_SIZE);
+	} else {
+		close(fd);
+		utils_err("Unknown encryption policy version: %i\n", policy_req.policy.version);
+		errno = EINVAL;
+		return -1;
+	}
+
+	ret = ioctl(fd, FS_IOC_GET_ENCRYPTION_KEY_STATUS, &key_status_req);
+	close(fd);
+	if (ret == -1) {
+		utils_err("Could not get encryption key status for: %s\n", path);
+		utils_perr("ioctl() failed");
+		return ret;
+	}
+
+	if (key_status_req.status == FSCRYPT_KEY_STATUS_PRESENT) {
+		utils_dbg("Key present for: %s\n", path);
+		return 1;
+	}
+
+	utils_dbg("Key absent for: %s\n", path);
+	return 0;
+}
+
+/******************\
 * FSFREEZE/ FSTHAW *
 \******************/
 
@@ -208,7 +283,7 @@ int set_fs_freeze(char* path, bool freeze) {
 	int mpfd = 0;
 	int ret = 0;
 
-	/* Temporarily terminate path at mountpoint_len + 1*/
+	/* Temporarily terminate path at mountpoint_len */
 	saved = path[mountpoint_len];
 	path[mountpoint_len] = '\0';
 

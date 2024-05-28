@@ -35,7 +35,7 @@ void usage(const char *self)
 	utils_info("\t--ignore-nodump\tIgnore the NODUMP attribute (see chattr(5) option d) and copy marked files anyway\n");
 	utils_info("\t--ext4-fstimes\tAttempt to preserve ctime/crtime on destination fs in case it's ext4\n");
 	utils_info("\t--force-update\tAlways update files on destination if they exist\n");
-	utils_info("\t--copy-encrypted\tAssume all encrypted files in source hierarchy are unlocked\n");
+	utils_info("\t--copy-encrypted\tTry to copy encrypted files (with fscrypt) that have been previously unlocked\n");
 	utils_info("\t--keep-going\tContinue on failure instead of exiting\n");
 	utils_info("\t--no-space-check\tIgnore the check for enough free space on target\n");
 	utils_info("\t--purge-excess\tPurge excess files/directories from target hierarchy\n");

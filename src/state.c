@@ -121,19 +121,37 @@ static int traverse_file_hierarchy(struct e4b_state *st, const char* rootpath, b
 					}
 			}
 			/* Skip encrypted dirs that we can't process */
-			/* Note: We can't handle encrypted files with the current user API,
+			/* Note: There are some limitations in the current user API,
 			 * for regular files we can try and open them and fail with ENOKEY,
 			 * for directories we can open them and use ioctls to see if the key
 			 * used for their encryption is present, but for symlinks we can do
-			 * nothing (ioctl doesn't accept O_PATH descriptors). According to
-			 * the docs there will be an API for backing up encrypted files
-			 * but it's not there yet. So for now warn the user and let the
-			 * user copy the encrypted files manualy after adding the key to
-			 * the keyring/unlocking them. As an alternative, check for the
-			 * E4B_OPT_COPY_ENCRYPTED option and assume the user has already
-			 * provided the encryption keys needed. */
-			if ((stx_tmp.stx_attributes & STATX_ATTR_ENCRYPTED) &&
-				!(st->opts & E4B_OPT_COPY_ENCRYPTED)) {
+			 * nothing (ioctl doesn't accept O_PATH descriptors). Another issue
+			 * (which is also a security threat) is that in order to backup the
+			 * encrypted files, they should get unlocked beforehand, opening a
+			 * window of opportunity to an attacker. According to the docs there
+			 * will be an API for backing up encrypted files but it's not there yet.
+			 * Since the idea is that fscrypt handles directories and not individual
+			 * files, we can assume that checking if the encryption key for this
+			 * directory is present, we are good to go, otherwise warn the user
+			 * and skip this directory because we won't be able to read it. */
+			if (stx_tmp.stx_attributes & STATX_ATTR_ENCRYPTED) {
+				if (st->opts & E4B_OPT_COPY_ENCRYPTED) {
+					ret = is_key_available(fs_stream_entry->fts_path);
+					if (ret == 0 || ret < 0) {
+						if (ret == 0)
+							utils_err("Key not present for: %s\n",
+								  fs_stream_entry->fts_path);
+						else
+							utils_err("Could not determine key status for: %s\n",
+								  fs_stream_entry->fts_path);
+						ret = fts_set(fs_stream, fs_stream_entry, FTS_SKIP);
+						if (ret == -1) {
+							utils_perr("fts_set() failed");
+							fts_close(fs_stream);
+							return errno;
+						}
+					}
+				} else {
 					utils_dbg("Ignoring encrypted subdir: %s\n",
 							  fs_stream_entry->fts_path);
 					ret = fts_set(fs_stream, fs_stream_entry, FTS_SKIP);
@@ -142,6 +160,7 @@ static int traverse_file_hierarchy(struct e4b_state *st, const char* rootpath, b
 						fts_close(fs_stream);
 						return errno;
 					}
+				}
 			}
 			/* We don't care for ordering in case of the target hierarchy, since
 			 * we'll use a hashtable, but for the source hierarchy in the end we
