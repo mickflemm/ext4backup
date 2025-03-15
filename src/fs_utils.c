@@ -386,7 +386,7 @@ static int open_extfs(struct e4b_state *st) {
 	}
 	udev_device_unref(dev);
 
-	if (!inode_includes(EXT2_INODE_SIZE(st->dst_fs->super), i_crtime_extra)) {
+	if (!ext2fs_inode_includes(EXT2_INODE_SIZE(st->dst_fs->super), i_crtime_extra)) {
 		utils_wrn("Inodes on %s are not large enough to include crtime\n", dev_name);
 		ext2fs_close_free(&st->dst_fs);
 		return ENOTSUP;
